@@ -37,6 +37,8 @@ systemd_system_unit_dir = systemd.get_variable('systemdsystemunitdir')
 
 service_file = 'service_files/com.ibm.panel.service'
 
+add_project_arguments('-DPLDM_HAS_POLL=1', language: 'cpp')
+
 if get_option('system-vpd-dependency').enabled()
     service_file = 'service_files/ibm.panel.system.vpd.dependent.service'
 endif

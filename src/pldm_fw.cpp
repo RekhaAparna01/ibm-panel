@@ -7,6 +7,7 @@
 #include <libpldm/platform.h>
 #include <libpldm/pldm.h>
 #include <libpldm/state_set.h>
+#include <poll.h>
 
 #include <iostream>
 #include <sdbusplus/asio/connection.hpp>
@@ -14,26 +15,135 @@
 
 namespace panel
 {
-types::Byte PldmFramework::getInstanceID()
+pldm_instance_id_t PldmFramework::getInstanceID()
 {
-    types::Byte instanceId = 0;
-    auto bus = sdbusplus::bus::new_default();
+    // Fetch Instance ID DB
+    int rc = pldm_instance_db_init_default(&pldmInstanceDb);
 
-    try
+    if (rc != 0)
     {
-        auto method = bus.new_method_call(
-            "xyz.openbmc_project.PLDM", "/xyz/openbmc_project/pldm",
-            "xyz.openbmc_project.PLDM.Requester", "GetInstanceId");
-        method.append(mctpEid);
-        auto reply = bus.call(method);
-        reply.read(instanceId);
+        throw std::runtime_error(
+            "Call to pldm_instance_db_init_default failed with return code " +
+            std::to_string(rc));
     }
-    catch (const sdbusplus::exception::SdBusError& e)
+
+    // Initialising with an invalid/unused ID.
+    pldm_instance_id_t instanceID = constants::PLDM_INST_ID_MAX + 1;
+
+    rc = pldm_instance_id_alloc(pldmInstanceDb, tid, &instanceID);
+    if (rc == -EAGAIN)
     {
-        std::cerr << e.what() << std::endl;
-        throw FunctionFailure("pldm: call to GetInstanceId failed.");
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        rc = pldm_instance_id_alloc(pldmInstanceDb, tid, &instanceID);
     }
-    return instanceId;
+
+    if (rc != 0)
+    {
+        throw FunctionFailure(
+            "Call to pldm_instance_id_alloc failed with return code " +
+            std::to_string(rc));
+    }
+
+    return instanceID;
+}
+
+void PldmFramework::freeInstanceID(pldm_instance_id_t instanceID)
+{
+    if (!pldmInstanceDb)
+    {
+        return;
+    }
+
+    // constants::PLDM_INST_ID_MAX is 32 (0 to 31)
+    if (instanceID < constants::PLDM_INST_ID_MAX)
+    {
+        int rc = pldm_instance_id_free(pldmInstanceDb, tid, instanceID);
+
+        if (rc == -EAGAIN)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            rc = pldm_instance_id_free(pldmInstanceDb, tid, instanceID);
+        }
+
+        if (rc != 0)
+        {
+            std::cerr << "pldm_instance_id_free failed to free id = "
+                      << static_cast<int>(instanceID)
+                      << " of tid = " << static_cast<int>(tid) << " rc = " << rc
+                      << std::endl;
+        }
+    }
+
+    // Destroy the instance ID DB
+    int rc = pldm_instance_db_destroy(pldmInstanceDb);
+    if (rc != 0)
+    {
+        std::cerr << "pldm_instance_db_destroy failed with rc, " << rc << "\n";
+    }
+
+    pldmInstanceDb = nullptr;
+}
+
+int PldmFramework::openTransport()
+{
+    if (pldmTransport)
+    {
+        throw FunctionFailure("pldmTransport is already opened. Requested "
+                              "action is not allowed.");
+    }
+
+    int rc = pldm_transport_mctp_demux_init(&mctpSocket);
+    if (rc != 0)
+    {
+        std::cerr << "Call to pldm_transport_mctp_demux_init failed with rc = "
+                  << rc << std::endl;
+        throw FunctionFailure("Failed to init MCTP demux transport");
+    }
+
+    rc = pldm_transport_mctp_demux_map_tid(mctpSocket, tid, tid);
+    if (rc != 0)
+    {
+        std::cerr
+            << "Call to pldm_transport_mctp_demux_map_tid failed with rc = "
+            << rc << std::endl;
+        throw FunctionFailure(
+            "Call to pldm_transport_mctp_demux_map_tid failed with rc = " +
+            std::to_string(rc));
+    }
+
+    pldmTransport = pldm_transport_mctp_demux_core(mctpSocket);
+
+    if (!pldmTransport)
+    {
+        throw FunctionFailure(
+            "openTransport: Failed to get pldm_transport object.");
+    }
+
+    struct pollfd pollfd;
+    rc = pldm_transport_mctp_demux_init_pollfd(pldmTransport, &pollfd);
+    if (rc != 0)
+    {
+        std::cerr << "openTransport: Failed to get pollfd. rc = " << rc
+                  << std::endl;
+        throw FunctionFailure("openTransport: Failed to get pollfd. rc = " +
+                              std::to_string(rc));
+    }
+    return pollfd.fd;
+}
+
+void PldmFramework::closeTransport()
+{
+    if (mctpSocket)
+    {
+        // Deallocate memory pointed by pldmTransport object
+        pldm_transport_mctp_demux_destroy(mctpSocket);
+        mctpSocket = nullptr;
+    }
+
+    if (pldmTransport)
+    {
+        pldmTransport = nullptr;
+    }
 }
 
 void PldmFramework::fetchPanelEffecterStateSet(const types::PdrList& pdrs,
@@ -113,77 +223,76 @@ types::PldmPacket
 void PldmFramework::sendPanelFunctionToPhyp(
     const types::FunctionNumber& funcNumber)
 {
-    types::PdrList pdrs =
-        utils::getPDR(phypTerminusID, frontPanelBoardEntityId,
-                      stateIdToEnablePanelFunc, "FindStateEffecterPDR");
+    // Initialising with invalid/unused ID
+    pldm_instance_id_t instance = constants::PLDM_INST_ID_MAX + 1;
 
-    if (pdrs.empty())
+    try
+    {
+        // Get PDR for Panel
+        types::PdrList pdrs =
+            utils::getPDR(phypTerminusID, frontPanelBoardEntityId,
+                          stateIdToEnablePanelFunc, "FindStateEffecterPDR");
+
+        if (pdrs.empty())
+        {
+            throw std::runtime_error(
+                "Empty PDR returned for front panel board entity.");
+        }
+
+        // Allocate instance ID
+        instance = getInstanceID();
+
+        // Prepare the message packet
+        types::PldmPacket packet =
+            prepareSetEffecterReq(pdrs, instance, funcNumber);
+
+        if (packet.empty())
+        {
+            throw std::runtime_error(
+                "pldm:SetStateEffecterStates request message empty");
+        }
+
+        // Open PLDM socket based communication
+        int fd = openTransport();
+
+        pldm_tid_t pldmTID = static_cast<pldm_tid_t>(hostEid);
+        auto rc = pldm_transport_send_msg(pldmTransport, pldmTID, packet.data(),
+                                          packet.size());
+
+        std::cout << "Panel function " << static_cast<int>(funcNumber)
+                  << ". Data packet sent to pldm: ";
+        for (const auto i : packet)
+        {
+            std::cout << std::setfill('0') << std::setw(2) << std::hex << (int)i
+                      << " ";
+        }
+        std::cout << std::endl;
+
+        if (rc != pldm_requester_rc_t::PLDM_REQUESTER_SUCCESS)
+        {
+            throw std::runtime_error(
+                "pldm: pldm_transport_send_msg failed for panel function " +
+                static_cast<int>(funcNumber) + std::string(". Return code = ") +
+                std::to_string(rc) + std::string(". File descriptor = ") +
+                std::to_string(fd) + std::string(". Errno = ") +
+                std::to_string(errno));
+        }
+        std::cout << "Panel function " << static_cast<int>(funcNumber)
+                  << " executed successfully." << std::endl;
+    }
+    catch (const std::exception& e)
     {
         std::map<std::string, std::string> additionalData{};
         additionalData.emplace("DESCRIPTION",
-                               "Empty PDR returned for panel entity id.");
-        utils::createPEL("com.ibm.Panel.Error.HostCommunicationError",
-                         "xyz.openbmc_project.Logging.Entry.Level.Warning",
-                         additionalData);
-        return;
-    }
-
-    types::Byte instance = getInstanceID();
-
-    types::PldmPacket packet =
-        prepareSetEffecterReq(pdrs, instance, funcNumber);
-
-    if (packet.empty())
-    {
-        std::map<std::string, std::string> additionalData{};
-        additionalData.emplace(
-            "DESCRIPTION", "pldm:SetStateEffecterStates request message empty");
-        utils::createPEL("com.ibm.Panel.Error.HostCommunicationError",
-                         "xyz.openbmc_project.Logging.Entry.Level.Warning",
-                         additionalData);
-        return;
-    }
-
-    int fd = pldm_open();
-    if (fd == -1)
-    {
-        std::cerr << "pldm_open() failed with error = " << strerror(errno)
-                  << std::endl;
-        std::map<std::string, std::string> additionalData{};
-        additionalData.emplace("DESCRIPTION",
-                               "pldm: Failed to connect to MCTP socket");
+                               "panel to host communication failed. Error: " +
+                                   std::string(e.what()));
         additionalData.emplace("ERRNO:", strerror(errno));
         utils::createPEL("com.ibm.Panel.Error.HostCommunicationError",
                          "xyz.openbmc_project.Logging.Entry.Level.Warning",
                          additionalData);
-        return;
     }
 
-    std::cout << "packet data sent to pldm: ";
-    for (const auto i : packet)
-    {
-        std::cout << std::setfill('0') << std::setw(2) << std::hex << (int)i
-                  << " ";
-    }
-    std::cout << std::endl;
-
-    auto rc = pldm_send(mctpEid, fd, packet.data(), packet.size());
-
-    if (close(fd) == -1)
-    {
-        std::cerr << "Close on File descriptor failed with error = "
-                  << strerror(errno) << std::endl;
-    }
-
-    if (rc)
-    {
-        std::map<std::string, std::string> additionalData{};
-        additionalData.emplace(
-            "DESCRIPTION",
-            "pldm: pldm_send failed for panel function trigger.");
-        panel::utils::createPEL(
-            "com.ibm.Panel.Error.HostCommunicationError",
-            "xyz.openbmc_project.Logging.Entry.Level.Warning", additionalData);
-    }
+    closeTransport();
+    freeInstanceID(instance);
 }
 } // namespace panel

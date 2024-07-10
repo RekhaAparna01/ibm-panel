@@ -85,6 +85,9 @@ using PendingAttributesItemType =
     std::pair<std::string, std::tuple<std::string, AttributeValueType>>;
 using PendingAttributesType = std::vector<PendingAttributesItemType>;
 
+/** @brief Host terminus ID. */
+using TerminusID = uint8_t;
+
 enum ButtonEvent
 {
     INCREMENT,

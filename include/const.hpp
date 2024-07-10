@@ -123,5 +123,8 @@ static const uint8_t LEN_OF_RAW_HEX_WORD = 4;
 static const uint8_t WORDS_PER_DISPLAY = 4;
 
 static const std::string defaultHexWordValue = "00000000";
+
+// Maximum valid instance IDs' which can be created by libpldm
+static constexpr auto PLDM_INST_ID_MAX = 32;
 } // namespace constants
 } // namespace panel
