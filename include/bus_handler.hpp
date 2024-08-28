@@ -61,9 +61,8 @@ class BusHandler
                                      {
                                          this->executor->setOSIPLMode(newVal);
                                          oldVal = newVal;
-                                         return 1;
                                      }
-                                     return 0;
+                                     return 1;
                                  });
 
         iface->register_method("ExecuteFunction",
