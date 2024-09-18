@@ -508,8 +508,7 @@ void BootProgressCode::progressCodeCallBack(sdbusplus::message_t& msg)
 SystemStatus::SystemStatus(
     std::shared_ptr<sdbusplus::asio::connection>& con,
     std::shared_ptr<state::manager::PanelStateManager>& manager) :
-    conn(con),
-    stateManager(manager)
+    conn(con), stateManager(manager)
 {
     initSystemOperatingMode();
     listenBmcState();

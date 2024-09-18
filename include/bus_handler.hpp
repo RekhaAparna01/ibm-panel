@@ -31,8 +31,8 @@ class BusHandler
                std::shared_ptr<sdbusplus::asio::dbus_interface>& iface,
                std::shared_ptr<state::manager::PanelStateManager>& manager,
                std::shared_ptr<Executor>& executor) :
-        transport(transport),
-        iface(iface), stateManager(manager), executor(executor)
+        transport(transport), iface(iface), stateManager(manager),
+        executor(executor)
     {
         iface->register_method("Display", [this](const std::string& line1,
                                                  const std::string& line2) {
