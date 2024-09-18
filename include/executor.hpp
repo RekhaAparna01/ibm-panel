@@ -33,8 +33,7 @@ class Executor
     Executor(std::shared_ptr<Transport> transport,
              std::shared_ptr<sdbusplus::asio::dbus_interface>& iface,
              std::shared_ptr<boost::asio::io_context>& io) :
-        transport(transport),
-        iface(iface), io_context(io)
+        transport(transport), iface(iface), io_context(io)
     {
     }
 

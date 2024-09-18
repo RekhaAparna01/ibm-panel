@@ -17,8 +17,8 @@ ButtonHandler::ButtonHandler(
     std::shared_ptr<Transport> transport,
     std::shared_ptr<state::manager::PanelStateManager> stateManager,
     const std::string& busPath) :
-    devicePath(path),
-    io(io), transport(transport), stateManager(stateManager), busPath(busPath)
+    devicePath(path), io(io), transport(transport), stateManager(stateManager),
+    busPath(busPath)
 {
     // TODO update this to actual size needed.
     ipEvent.resize(10);

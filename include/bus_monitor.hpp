@@ -33,8 +33,8 @@ class PanelPresence
                   std::shared_ptr<sdbusplus::asio::connection> conn,
                   std::shared_ptr<Transport> transport,
                   std::shared_ptr<state::manager::PanelStateManager> state) :
-        objectPath(objPath),
-        conn(conn), transport(transport), stateManager(state)
+        objectPath(objPath), conn(conn), transport(transport),
+        stateManager(state)
     {
     }
 
@@ -90,8 +90,8 @@ class PELListener
                 std::shared_ptr<state::manager::PanelStateManager> manager,
                 std::shared_ptr<Executor> execute,
                 std::shared_ptr<Transport>& transport) :
-        conn(con),
-        stateManager(manager), executor(execute), transport(transport)
+        conn(con), stateManager(manager), executor(execute),
+        transport(transport)
     {
     }
 
@@ -166,8 +166,7 @@ class BootProgressCode
     BootProgressCode(std::shared_ptr<Transport> transport,
                      std::shared_ptr<sdbusplus::asio::connection> con,
                      std::shared_ptr<Executor> execute) :
-        transport(transport),
-        conn(con), executor(execute)
+        transport(transport), conn(con), executor(execute)
     {
     }
 

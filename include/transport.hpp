@@ -31,8 +31,8 @@ class Transport
      */
     Transport(const std::string& devPath, const uint8_t& devAddr,
               const types::PanelType& type, const std::string& objectPath) :
-        devPath(devPath),
-        devAddress(devAddr), panelType(type), fruPath(objectPath)
+        devPath(devPath), devAddress(devAddr), panelType(type),
+        fruPath(objectPath)
     {
         panelI2CSetup();
     }
