@@ -163,10 +163,13 @@ class BootProgressCode
      * @param[in] con - Bus connection.
      * @param[in] execute - pointer to Executor.
      */
-    BootProgressCode(std::shared_ptr<Transport> transport,
-                     std::shared_ptr<sdbusplus::asio::connection> con,
-                     std::shared_ptr<Executor> execute) :
-        transport(transport), conn(con), executor(execute)
+    BootProgressCode(
+        std::shared_ptr<Transport> transport,
+        std::shared_ptr<sdbusplus::asio::connection> con,
+        std::shared_ptr<Executor> execute,
+        std::shared_ptr<state::manager::PanelStateManager> manager) :
+        transport(transport), conn(con), executor(execute),
+        stateManager(manager)
     {
     }
 
@@ -192,6 +195,8 @@ class BootProgressCode
     /* Executor */
     std::shared_ptr<Executor> executor;
 
+    /* State manager */
+    std::shared_ptr<state::manager::PanelStateManager> stateManager;
 }; // class BootProgressCode
 
 /**
